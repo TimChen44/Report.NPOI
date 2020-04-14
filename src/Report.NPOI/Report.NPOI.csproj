@@ -8,6 +8,10 @@
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/TimChen44/Report.NPOI</PackageProjectUrl>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <Authors>TimChen44</Authors>
+    <Product />
+    <Company />
+    <Version>1.0.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
