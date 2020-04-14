@@ -15,14 +15,8 @@ namespace Report.NPOI
     /// </summary>
     public class LabelSet
     {
-        //替换标签集合
-        public List<ReplaceLabel> Replaces { get; set; } = new List<ReplaceLabel>();
-
-        //表格标签集合
-        public List<TableLabel> Tables { get; set; } = new List<TableLabel>();
-
-        //公式标签集合
-        public List<FormulaLabel> Formulas { get; set; } = new List<FormulaLabel>();
+        //替换标签和表格标签集合
+        public List<Label> Labels { get; set; } = new List<Label>();
 
         ISheet Sheet;
 
@@ -51,40 +45,70 @@ namespace Report.NPOI
 
                     var label = cell.StringCellValue;
                     if (label.StartsWith("$:"))
-                        Replaces.Add(new ReplaceLabel(cell, label));
+                        Labels.Add(new ReplaceLabel(cell, label));
                     else if (label.StartsWith("$$"))
-                        Tables.Add(new TableLabel(cell, label));
+                        Labels.Add(new TableLabel(cell, label));
                     if (label.StartsWith("$="))
-                        Formulas.Add(new FormulaLabel(cell, label));
+                        Labels.Add(new FormulaLabel(cell, label));
                 }
 
             }
         }
 
+        /// <summary>
+        /// 填充数据
+        /// </summary>
+        /// <param name="reportDataSource"></param>
+        public void Fill(ReportDataSource reportDataSource)
+        {
+            //进行标签替换
+            WriteReplace(reportDataSource.Data);
+
+            //进行表格填充
+            foreach (var table in reportDataSource.Tables)
+            {
+                WriteTable(table.Key, table.Value);
+            }
+
+            WriteFormula();
+        }
+
 
         /// <summary>
-        /// 构造公式，通过分析公式中的内容进行构造出Excel可以使用的公式
+        /// 构造公式，并且填充公式
         /// </summary>
         /// <param name="formula"></param>
         /// <param name="getAddress"></param>
-        private string ConstructFormula(string? formula, Func<Label, string?> getAddress)
+        private void FillFormula(ICell currentCell, string formula, Func<Label, string?> getAddress)
         {
-            if (string.IsNullOrWhiteSpace(formula)) return "";
             Regex regex = new Regex(@"(?<=[{]).*?(?=[}])");
             var variable = regex.Matches(formula);
             foreach (Match? item in variable)
             {
-                Label varLabel = Tables.FirstOrDefault(x => x.ToString() == item?.Value);
-                if (varLabel == null)
-                    varLabel = Replaces.FirstOrDefault(x => x.ToString() == item?.Value);
-                if (varLabel == null)
-                    continue;
+                Label varLabel = Labels.FirstOrDefault(x => x.ToString() == item?.Value);
 
                 formula = formula.Replace($"{{{item?.Value}}}", getAddress(varLabel));
                 continue;
             }
-            return formula;
+            currentCell?.SetCellType(CellType.Formula);
+            currentCell?.SetCellFormula(formula);
         }
+
+        /// <summary>
+        /// 填充值
+        /// </summary>
+        private void FillValue(ICell currentCell, string labelName, object data, PropertyInfo[] properties)
+        {
+            var prop = properties.FirstOrDefault(x => x.Name == labelName);
+            if (prop == null)
+            {
+                currentCell.SetCellValue("");
+                return;
+            }
+            object? value = prop.GetValue(data);
+            currentCell.SetCellValueObject(value);
+        }
+
 
         /// <summary>
         /// 填写标签数据
@@ -94,16 +118,9 @@ namespace Report.NPOI
         {
             var properties = data.GetType().GetProperties();
 
-            foreach (var label in Replaces)
+            foreach (ReplaceLabel label in Labels.Where(x => x is ReplaceLabel))
             {
-                var prop = properties.FirstOrDefault(x => x.Name == label.Name);
-                if (prop == null)
-                {
-                    label.Cell.SetCellValue("");
-                    continue;
-                }
-                object? value = prop.GetValue(data);
-                label.Cell.SetCellValueObject(value);
+                FillValue(label.Cell, label.Name, data, properties);
             }
         }
 
@@ -115,11 +132,12 @@ namespace Report.NPOI
         public void WriteTable(string tabelName, List<object> datas)
         {
             //找到所有表格标签
-            var labels = Tables.Where(x => x.Table == tabelName).ToList();
+            var labels = Labels.Where(x => x is TableLabel label && label.Table == tabelName).Cast<TableLabel>().ToList();
             if (labels.Count == 0) return;
 
             //获得模板行
-            var tempRow = Sheet.GetRow(labels.First().Cell.RowIndex);
+            //var tempRow = Sheet.GetRow(labels.First().Cell.RowIndex);
+            var tempRow = labels.First().Cell.Row;
 
             //根据表格行数量创建空表格
             for (int i = 0; i < datas.Count - 1; i++)
@@ -134,22 +152,16 @@ namespace Report.NPOI
 
                 foreach (var label in labels)
                 {
+                    var currentCell = Sheet.GetCell(tempRow.RowNum + dataRowIndex, label.Cell.ColumnIndex);
+                    if (currentCell == null) continue;
+
                     if (string.IsNullOrWhiteSpace(label.Formula))
                     {//没有公式，那么只是普通的数据替换
-                        var prop = properties.FirstOrDefault(x => x.Name == label.Name);
-                        if (prop == null)
-                        {
-                            Sheet.GetCell(tempRow.RowNum + dataRowIndex, label.Cell.ColumnIndex)?.SetCellValue("");
-                            continue;
-                        }
-                        object? value = prop.GetValue(datas[dataRowIndex]);
-                        Sheet.GetCell(tempRow.RowNum + dataRowIndex, label.Cell.ColumnIndex)?.SetCellValueObject(value);
+                        FillValue(currentCell, label.Name, datas[dataRowIndex], properties);
                     }
                     else
                     {//进入公式编辑方式
-                        var formula = ConstructFormula(label.Formula, label => Sheet.GetCell(tempRow.RowNum + dataRowIndex, label.Cell.ColumnIndex)?.Address?.FormatAsString());
-                        Sheet.GetCell(tempRow.RowNum + dataRowIndex, label.Cell.ColumnIndex)?.SetCellType(CellType.Formula);
-                        Sheet.GetCell(tempRow.RowNum + dataRowIndex, label.Cell.ColumnIndex)?.SetCellFormula(formula);
+                        FillFormula(currentCell, label.Formula, label => Sheet.GetCell(tempRow.RowNum + dataRowIndex, label.Cell.ColumnIndex)?.Address?.FormatAsString());
                     }
                 }
             }
@@ -166,126 +178,13 @@ namespace Report.NPOI
         /// </summary>
         public void WriteFormula()
         {
-            foreach (var label in Formulas)
+            foreach (FormulaLabel label in Labels.Where(x => x is FormulaLabel))
             {
-                var formula = ConstructFormula(label.Formula, label => label.AddressString());
+                FillFormula(label.Cell, label.Formula, label => label.AddressString());
 
-                label.Cell.SetCellType(CellType.Formula);
-                label.Cell.SetCellFormula(formula);
             }
 
         }
     }
 
-    /// <summary>
-    /// 标签，用于标记单元格的用于
-    /// 格式：$+类型
-    /// </summary>
-    public abstract class Label
-    {
-        public Label(ICell cell)
-        {
-            this.Cell = cell;
-        }
-
-        public ICell Cell { get; set; }
-
-        /// <summary>
-        /// 公式
-        /// </summary>
-        public string? Formula { get; set; } = null;
-
-        public abstract string AddressString();
-    }
-
-    /// <summary>
-    /// 替换标记
-    /// 格式：$:[字段名称]
-    /// 例如：$:Company
-    /// </summary>
-    public class ReplaceLabel : Label
-    {
-        public ReplaceLabel(ICell cell, string label) : base(cell)
-        {
-            this.Name = label.Substring(2);
-        }
-
-        /// <summary>
-        /// 标签名称
-        /// </summary>
-        public string Name { get; set; }
-
-        public override string ToString() => $"{Name}";
-
-        public override string AddressString()
-        {
-            return Cell.Address.FormatAsString();
-        }
-
-    }
-
-    /// <summary>
-    /// 表格标签
-    /// 格式：$.[表名].[字段名]
-    /// 例如：$.Table.UserName
-    /// </summary>
-    public class TableLabel : Label
-    {
-        public TableLabel(ICell cell, string label) : base(cell)
-        {
-            label = label.Substring(2);
-            this.Table = label.Substring(0, label.IndexOf("."));
-
-            label = label.Substring(label.IndexOf(".") + 1);
-
-            if (label.Contains("=") == true)
-            {
-                this.Name = label.Substring(0, label.IndexOf("="));
-                this.Formula = label.Substring(label.IndexOf("=") + 1);
-            }
-            else
-            {
-                this.Name = label;
-            }
-        }
-
-        /// <summary>
-        /// 主体，这个标签属于谁，比如属于那个表格，默认是空
-        /// </summary>
-        public string Table { get; set; }
-        /// <summary>
-        /// 标签名称
-        /// </summary>
-        public string Name { get; set; }
-
-        /// <summary>
-        /// 记录当前对象填充的数据的范围
-        /// </summary>
-        public CellRangeAddress? CellRange { get; set; }
-
-        public override string ToString() => $"{Table}.{Name}";
-
-        public override string AddressString()
-        {
-            return CellRange?.FormatAsString() ?? Cell.Address.FormatAsString();
-        }
-    }
-
-    /// <summary>
-    /// 公式标签
-    /// 格式：$=[公式]
-    /// 例如：$=SUM(
-    /// </summary>
-    public class FormulaLabel : Label
-    {
-        public FormulaLabel(ICell cell, string label) : base(cell)
-        {
-            this.Formula = label.Substring(2);
-        }
-
-        public override string AddressString()
-        {
-            return Cell.Address.FormatAsString();
-        }
-    }
 }

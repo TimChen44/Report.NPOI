@@ -39,8 +39,6 @@ namespace Report.NPOI.Extension.Tests
 
             var ms = new MemoryStream();
             workbook.Write(ms);
-
-
             workbook.Close();
         }
 
