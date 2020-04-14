@@ -4,6 +4,9 @@
     <TargetFrameworks>netcoreapp3.1;net48</TargetFrameworks>
     <Nullable>enable</Nullable>
     <LangVersion>8.0</LangVersion>
+    <Description>使用Excel模板，将文件中的标签做替换，实现各类报表输出</Description>
+    <Copyright></Copyright>
+    <PackageProjectUrl>https://github.com/TimChen44/Report.NPOI</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>
