@@ -9,11 +9,11 @@ Install-Package Report.NPOI
 
 ### 模板
 
-![image](https://github.com/TimChen44/Report.NPOI/raw/master/doc/1.png)
+![image](https://github.com/TimChen44/Report.NPOI/raw/master/doc/a.png)
  
 ### 输出
 
-![image](https://github.com/TimChen44/Report.NPOI/raw/master/doc/2.png)
+![image](https://github.com/TimChen44/Report.NPOI/raw/master/doc/b.png)
 
 ### 代码
 
